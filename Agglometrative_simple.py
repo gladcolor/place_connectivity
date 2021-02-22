@@ -267,11 +267,11 @@ def get_sample_conn_mat():
 
 if __name__ == "__main__":
     country_list = pd.read_csv(
-        r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\LA_tract_list.txt',
+        r'LA_tract_list.txt',
         header=None, names=['country'])
     gby_list = country_list['country'].tolist()
 
-    saved_file_world = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\LA_matrix.csv.npz'
+    saved_file_world = r'LA_matrix.csv.npz'
 
 
     world_matrix = scipy.sparse.load_npz(saved_file_world).todense()
@@ -285,13 +285,10 @@ if __name__ == "__main__":
     np.fill_diagonal(dis_mat, np.nan)
 
     conn_mat = np.where(world_matrix > 0, 1, 0)
-    # print(conn_mat)
-    # dis_mat.mask = 1-conn_mat
+
     n_cluster_list = [5, 10, 20, 40, 60]
     n_cluster_list = sorted(n_cluster_list, reverse=True)
-    # n_cluster_list = [2770, 2760]
 
-    # print(1-conn_mat)
     saved_path = os.getcwd()
     dis_mat[dis_mat == -1] = np.nan
     print(dis_mat)
