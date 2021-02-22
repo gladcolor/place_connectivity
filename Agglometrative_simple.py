@@ -138,6 +138,13 @@ class Node(object):
 
 
 def sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list):
+    '''
+    Conduct agglomerative clustering. Reference: UPGMA (unweighted pair group method with arithmetic mean), https://en.wikipedia.org/wiki/UPGMA.
+    :param dis_mat: precomputed distance matrix
+    :param conn_mat: connectivity matrix
+    :param n_cluster_list: a list of number of clusters
+    :return: a list with cluster results, each element is a list of tuple (node.index, label).
+    '''
     if not isinstance(n_cluster_list, list):
         n_cluster_list = [n_cluster_list]
     n_cluster_list = sorted(n_cluster_list, reverse=True)
