@@ -4,6 +4,9 @@ import pandas as pd
 import sklearn
 from sklearn.cluster import AgglomerativeClustering
 import numpy as np
+import numba as nb
+from numba import jit
+
 import os
 
 from natsort import natsorted
@@ -15,13 +18,11 @@ from urllib.request import urlopen
 
 
 
-
-
-
+# @jit(nopython=True)
 def argmin(x):
     return divmod(np.nanargmin(x), x.shape[1])
 
-
+@jit(nopython=True)
 def nansum(a, b):
     result = np.where(
     np.isnan(a+b),
@@ -29,10 +30,12 @@ def nansum(a, b):
     a+b)
     return result
 
+@jit(nopython=True)
 def nanmean(a, b):
     result = np.nanmean(np.stack((a, b)), axis=0)
     return result
 
+@jit(nopython=True)
 def nanprod(a, b):
     result = np.nanprod(np.stack((a, b)), axis=0)
     return result
@@ -137,6 +140,7 @@ class Node(object):
                     self, other, children_dist=distance)
 
 
+
 def sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list):
     '''
     Conduct agglomerative clustering. Reference: UPGMA (unweighted pair group method with arithmetic mean), https://en.wikipedia.org/wiki/UPGMA.
@@ -186,24 +190,12 @@ def sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list):
 
 # def set_eye_nan(a):
 
-
-def merge_minpair(dis_mat, nodes, node_cnt_mat, eliminated_eles):
-    #     print("len(nodes):", len(nodes))
-    min_pair = argmin(dis_mat)
-    min_distance = np.nanmin(dis_mat)
-
-    eliminated_idx = max(min_pair)
-
-    eliminated_eles.append(eliminated_idx)
-
-    eliminated_ele = dis_mat[eliminated_idx].copy()
-    #     print("eliminated_ele:", eliminated_ele)
-    new_idx = min(min_pair)
-
+@jit(nopython=True)
+def matrix_oper(dis_mat, node_cnt_mat, eliminated_idx, new_idx):
     #     print("scores:", features[eliminated_idx], features[new_idx])
     new_node_cnt_row = nansum(node_cnt_mat[new_idx], node_cnt_mat[eliminated_idx])
     # row1 = nanprod(dis_mat[new_idx], node_cnt_mat[new_idx])
-    row1 = dis_mat[new_idx]  * node_cnt_mat[new_idx]
+    row1 = dis_mat[new_idx] * node_cnt_mat[new_idx]
     # row2 = nanprod(dis_mat[eliminated_idx], node_cnt_mat[eliminated_idx])
     row2 = dis_mat[eliminated_idx] * node_cnt_mat[eliminated_idx]
     new_row = nansum(row1, row2)
@@ -222,6 +214,45 @@ def merge_minpair(dis_mat, nodes, node_cnt_mat, eliminated_eles):
 
     np.fill_diagonal(dis_mat, np.nan)
     np.fill_diagonal(node_cnt_mat, np.nan)
+
+# @jit(nopython=True)
+def merge_minpair(dis_mat, nodes, node_cnt_mat, eliminated_eles):
+    #     print("len(nodes):", len(nodes))
+    min_pair = argmin(dis_mat)
+    min_distance = np.nanmin(dis_mat)
+
+    eliminated_idx = max(min_pair)
+
+    eliminated_eles.append(eliminated_idx)
+
+    eliminated_ele = dis_mat[eliminated_idx].copy()
+    #     print("eliminated_ele:", eliminated_ele)
+    new_idx = min(min_pair)
+
+    # #     print("scores:", features[eliminated_idx], features[new_idx])
+    # new_node_cnt_row = nansum(node_cnt_mat[new_idx], node_cnt_mat[eliminated_idx])
+    # # row1 = nanprod(dis_mat[new_idx], node_cnt_mat[new_idx])
+    # row1 = dis_mat[new_idx]  * node_cnt_mat[new_idx]
+    # # row2 = nanprod(dis_mat[eliminated_idx], node_cnt_mat[eliminated_idx])
+    # row2 = dis_mat[eliminated_idx] * node_cnt_mat[eliminated_idx]
+    # new_row = nansum(row1, row2)
+    #
+    # new_row = new_row / new_node_cnt_row
+    # dis_mat[new_idx] = new_row
+    # dis_mat[:, new_idx] = new_row.T
+    # node_cnt_mat[new_idx] = new_node_cnt_row
+    # node_cnt_mat[:, new_idx] = new_node_cnt_row.T
+    # # conn_mat[new_idx] = nanmean(dis_mat[new_idx], dis_mat[eliminated_idx])
+    #
+    # dis_mat[eliminated_idx] = np.nan
+    # dis_mat[:, eliminated_idx] = np.nan
+    # node_cnt_mat[eliminated_idx] = np.nan
+    # node_cnt_mat[:, eliminated_idx] = np.nan
+    #
+    # np.fill_diagonal(dis_mat, np.nan)
+    # np.fill_diagonal(node_cnt_mat, np.nan)
+
+    matrix_oper(dis_mat, node_cnt_mat, eliminated_idx, new_idx)
 
     node1 = nodes[eliminated_idx]
     node2 = nodes[new_idx]
