@@ -36,7 +36,9 @@ def sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list):
 Agglomerative clustering for Los Angeles census tracts.
 
 Result from sk-learn.
+
 ![](sk-60.png)
 
 Reuslt from this repository.
+
 ![](h-60.png)
