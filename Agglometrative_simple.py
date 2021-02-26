@@ -6,8 +6,9 @@ from sklearn.cluster import AgglomerativeClustering
 import numpy as np
 import numba as nb
 from numba import jit
-
+from natsort import natsorted
 import os
+import scipy
 
 from natsort import natsorted
 from scipy.linalg import norm
@@ -18,7 +19,25 @@ from urllib.request import urlopen
 
 
 
-# @jit(nopython=True)
+@jit(nopython=True)
+def count_not_all_nan_rows(a):
+    cnt = len(a)
+    #     print(cnt)
+    for row in a:
+        #         print(row)
+        tags = np.ones(len(a))
+
+        for i in range(len(a)):
+            #             print(i)
+            #             print(np.isnan(row[i]))
+            if np.isnan(row[i]):
+                #                 print(tags)
+                tags[i] = 0
+
+        if tags.sum() == 0:
+            cnt -= 1
+    return cnt
+
 def argmin(x):
     return divmod(np.nanargmin(x), x.shape[1])
 
@@ -166,15 +185,16 @@ def sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list):
     node_cnt_mat[node_cnt_mat == 0] = np.nan
     np.fill_diagonal(node_cnt_mat, np.nan)
 
-    class_cnt = len(dis_mat)
+    # class_cnt = len(dis_mat)
+    class_cnt = count_not_all_nan_rows(dis_mat)
 
     eliminated_eles = []
     labels_all_rounds = []
     reported_cnt = 0
     while class_cnt > 1:
         new_node = merge_minpair(dis_mat, nodes, node_cnt_mat, eliminated_eles)
-        class_cnt -= 1
-        #         print()
+        # class_cnt -= 1
+        class_cnt = count_not_all_nan_rows(dis_mat)
 
         if class_cnt in n_cluster_list:
             labels_a_round = []
@@ -264,10 +284,11 @@ def merge_minpair(dis_mat, nodes, node_cnt_mat, eliminated_eles):
     # print(dis_mat)
     # print()
 
-    class_cnt = len(dis_mat) - len(eliminated_eles) + 1
+    class_cnt0 = len(dis_mat) - len(eliminated_eles) + 1
+    class_cnt = count_not_all_nan_rows(dis_mat)
     if class_cnt % 1 == 0:
         # print("min_pair:", min_pair)
-        print("current class_cnt, min_pair, eliminated_idx, new_idx, min_distance:", class_cnt, min_pair, eliminated_idx, new_idx, min_distance)
+        print("current class_cnt, min_pair, eliminated_idx, new_idx, min_distance:", class_cnt0, class_cnt, min_pair, eliminated_idx, new_idx, min_distance)
         # print("Current class_cnt: ", class_cnt)
     #         print()
 
@@ -286,9 +307,9 @@ def list_to_file(a_list, file_path, header=None):
     with open(file_path, 'w') as f:
         if header:
             f.write(str(header) + '\n')
-        for i in a_list:
-            line = ",".join([str(x) for x in i]) + '\n'
-            f.write(line)
+        # for i in a_list:
+        line = "\n".join([str(x) for x in a_list])
+        f.write(line)
 
 def get_sample_conn_mat():
     conn_mat = np.array([[0,1,1,1,1,1,1,1,1,1],
@@ -303,39 +324,175 @@ def get_sample_conn_mat():
                          [1,1,1,1,1,1,1,1,1,0]])
     return conn_mat
 
-if __name__ == "__main__":
-    country_list = pd.read_csv(
-        r'LA_tract_list.txt',
-        header=None, names=['country'])
-    gby_list = country_list['country'].tolist()
 
-    saved_file_world = r'LA_matrix.csv.npz'
+def csv_to_matrix(csv_path):
+    df = pd.read_csv(csv_path, dtype={"place_i": str, 'place_j': str})
+    df = df[df['place_i'] != df['place_j']]
+    tweet_user_min = 30
+    df = df[df['place_i_users'] > tweet_user_min]
+    df = df[df['place_j_users'] > tweet_user_min]
+    gby_o = df.groupby('place_i')['place_i'].count().index.to_list()
+    gby_d = df.groupby('place_j')['place_j'].count().index.to_list()
+    # gby = gby_o + gby_d
+    gby_list = gby_o + gby_d
+    gby_set = set(gby_list)
+    gby_list = list(gby_set)
+    gby_list = natsorted(gby_list)
+    path = os.path.dirname(csv_path)
+    basename = os.path.basename(csv_path)
+    basename = basename[:-4] + "_placename_list.txt"
+    saved_path = os.path.join(path, basename)
+    list_to_file(gby_list, saved_path)
+    print(df)
+    # build distance matrix
+    dis_mat = np.zeros((len(gby_list[:]), len(gby_list[:])))
+    print("dis_mat shape:", dis_mat.shape)
 
+    fips_dic = {}
+    for i in range(len(gby_list[:])):
+        #     print(i, gby_list[i])
+        fips_dic[gby_list[i]] = i
+
+
+    for idx, row in df.iterrows():
+        interval = 100000
+        i = fips_dic[row['place_i']]
+        j = fips_dic[row['place_j']]
+        i = int(i)
+        j = int(j)
+        dis_mat[i, j] = row['pci']
+        dis_mat[j, i] = row['pci']
+        if idx % interval == 0:
+            print(idx, i, j, dis_mat[i, j], dis_mat[j, i], row['place_i'], row['place_j'])
+
+    print("dis_mat.sum(),  df['pci'].sum:", dis_mat.sum(),  df['pci'].sum())
+    saved_file = saved_path.replace("_placename_list.txt", "_matrix.csv")
+    s_dis_mat = scipy.sparse.coo_matrix(dis_mat)
+    scipy.sparse.save_npz(saved_file, s_dis_mat, compressed=True)
+    print("Csv_to_matrix() done:", csv_path)
+
+
+def LA_clustering():
+    placename = pd.read_csv(
+        r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_LosAngeles_PCI_2019_placename_list.txt',
+        header=None, names=['placename'])
+    placename_list = placename['placename'].tolist()
+
+    saved_file_world = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_LosAngeles_PCI_2019_matrix.csv.npz'
 
     world_matrix = scipy.sparse.load_npz(saved_file_world).todense()
     world_matrix = np.array(world_matrix)
-    for i in range(len(world_matrix)):
-        world_matrix[i, i] = 0
+    np.fill_diagonal(world_matrix, 0)
 
-    dis_mat = world_matrix.max() + 1 - world_matrix
+    small_value = 0.00000001
+
+    # dis_mat = world_matrix.max() + 1 - world_matrix
+    dis_mat = 1 / (world_matrix / 1000 + small_value)
+
+    dis_mat[np.where(dis_mat == (1 / small_value))] = np.nan
 
     dis_mat[np.where(dis_mat > world_matrix.max())] = np.nan
     np.fill_diagonal(dis_mat, np.nan)
 
     conn_mat = np.where(world_matrix > 0, 1, 0)
 
-    n_cluster_list = [5, 10, 20, 40, 60]
+    n_cluster_list = [5, 10, 15, 20, 30, 40, 50, 60, 100]
     n_cluster_list = sorted(n_cluster_list, reverse=True)
 
-    saved_path = os.getcwd()
+    # saved_path = os.getcwd()
+    saved_path = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index'
+
     dis_mat[dis_mat == -1] = np.nan
     print(dis_mat)
     labels_all_rounds = sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list)
     for i, r in enumerate(labels_all_rounds):
         print(f"Clustering results for {str(n_cluster_list[i])} classes (node index, label):")
+        r = [str(placename_list[item[0]]) + "," + str(item[1]) for item in r]
         print(r)
-        new_name = os.path.join(saved_path, "cluster_" + str(n_cluster_list[i]) + ".csv")
+        new_name = os.path.join(saved_path, "LA_cluster_" + str(n_cluster_list[i]) + ".csv")
         list_to_file(r, new_name, header="node_index,class")
+
+#
+# def NYC_clustering():
+#     country_list = pd.read_csv(
+#         r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_NewYorkCity_PCI_2019_placename_list.txt',
+#         header=None, names=['fips'])
+#     gby_list = country_list['fips'].tolist()
+#
+#     saved_file_world = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_NewYorkCity_PCI_2019_matrix.csv.npz'
+#
+#     world_matrix = scipy.sparse.load_npz(saved_file_world).todense()
+#     world_matrix = np.array(world_matrix)
+#     np.fill_diagonal(world_matrix, 0)
+#
+#     small_value = 0.00000001
+#     dis_mat = 1 / (world_matrix / 1000 + small_value)
+#
+#     dis_mat[np.where(dis_mat == (1 / small_value))] = np.nan
+#     np.fill_diagonal(dis_mat, np.nan)
+#
+#     conn_mat = np.where(world_matrix > 0, 1, 0)
+#
+#     n_cluster_list = [5, 10, 15, 20, 30, 40, 50, 60, 100]
+#     n_cluster_list = sorted(n_cluster_list, reverse=True)
+#
+#     # saved_path = os.getcwd()
+#     saved_path = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index'
+#     # dis_mat[dis_mat == -1] = np.nan
+#     print(dis_mat)
+#     labels_all_rounds = sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list)
+#     for i, r in enumerate(labels_all_rounds):
+#         print(f"Clustering results for {str(n_cluster_list[i])} classes (node index, label):")
+#         print(r)
+#         new_name = os.path.join(saved_path, "cluster_" + str(n_cluster_list[i]) + ".csv")
+#         list_to_file(r, new_name, header="node_index,class")
+
+def count_not_nan_rows(a):
+    cnt = len(a)
+    for row in a:
+        if np.isnan(row):
+            cnt - 1
+    return cnt
+
+def NYC_clustering():
+    placename_list = pd.read_csv(
+        r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_NewYorkCity_PCI_2019_placename_list.txt',
+        header=None, names=['placename'])
+    placename_list = placename_list['placename'].tolist()
+
+    saved_file_world = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_NewYorkCity_PCI_2019_matrix.csv.npz'
+
+    world_matrix = scipy.sparse.load_npz(saved_file_world).todense()
+    world_matrix = np.array(world_matrix)
+    np.fill_diagonal(world_matrix, 0)
+
+    small_value = 0.00000001
+    dis_mat = 1 / (world_matrix / 1000 + small_value)
+
+    dis_mat[np.where(dis_mat == (1 / small_value))] = np.nan
+    np.fill_diagonal(dis_mat, np.nan)
+
+    conn_mat = np.where(world_matrix > 0, 1, 0)
+
+    n_cluster_list = [5, 10, 15, 20, 30, 40, 50, 60, 100]
+    n_cluster_list = sorted(n_cluster_list, reverse=True)
+
+    saved_path = os.getcwd()
+    saved_path = r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index'
+    # dis_mat[dis_mat == -1] = np.nan
+    print(dis_mat)
+    labels_all_rounds = sample_AgglomerativeClustering(dis_mat, conn_mat, n_cluster_list)
+    for i, r in enumerate(labels_all_rounds):
+        print(f"Clustering results for {str(n_cluster_list[i])} classes (node index, label):")
+        r = [str(placename_list[item[0]]) + "," + str(item[1]) for item in r]
+        print(r)
+        new_name = os.path.join(saved_path, "NYC_cluster_" + str(n_cluster_list[i]) + ".csv")
+        list_to_file(r, new_name, header="node_index,class")
+if __name__ == "__main__":
+    LA_clustering()
+    # csv_to_matrix(r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_NewYorkCity_PCI_2019.csv')
+    # csv_to_matrix(r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\place_connectivity\0223\Place-Connectivity-Index\US_CensusTract_LosAngeles_PCI_2019.csv')
+    NYC_clustering()
 
 
 
