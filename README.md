@@ -42,3 +42,8 @@ Result from sk-learn.
 Reuslt from this repository.
 
 ![](h-60.png)
+
+# Note:
+
+In sk-learn, the distance matrix should be symmetrical (a = a.T), and has no isolated node! That is, in the connectivity 
+matrix, every row and column should have a non-zero element at least!
